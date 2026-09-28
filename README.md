@@ -11,6 +11,8 @@ This CLI runs both, has TypeSafe's [Jev](https://docs.typesafe.ai/) judge every
 reported pair the way a code reviewer would, and prints only the pairs worth
 merging, each with the change the reviewer would ask for.
 
+> **OpenJEV support:** Jev is built by [TypeSafe](https://typesafe.ai). This fork keeps TypeSafe as the default and adds optional support for [OpenJEV](https://openjev.sh), a free community gateway to the same Jev model — set `OPENJEV_API_KEY` (or `JEV_PROVIDER=openjev`) to use it. Original project: https://github.com/kongyo2/similarity-ts-jev by @kongyo2.
+
 ```bash
 export TYPESAFE_API_KEY=apikey_...   # https://console.typesafe.ai/keys
 npx @kongyo2/similarity-ts-jev .
@@ -168,8 +170,8 @@ Judgment:
 | `--pairs-per-request <n>` | `64`                                             | pairs packed into one request                                            |
 | `--budget-tokens <n>`     | `50000`                                          | estimated input tokens per request (the gateway ceiling is 65,536)       |
 | `--retries <n>`           | `2`                                              | extra attempts after a rate limit, server error, or connection failure   |
-| `--model <name>`          | `TYPESAFE_DEFAULT_MODEL` or `jev-latest`         | Jev model                                                                |
-| `--base-url <url>`        | `TYPESAFE_BASE_URL` or `https://api.typesafe.ai` | TypeSafe-compatible API root                                             |
+| `--model <name>`          | `TYPESAFE_DEFAULT_MODEL`, `OPENJEV_DEFAULT_MODEL`, `jev-latest`, or `openjev` | Jev model                                                                |
+| `--base-url <url>`        | `TYPESAFE_BASE_URL`, `https://api.typesafe.ai`, or `https://api.openjev.sh` | TypeSafe-compatible API root                                             |
 | `--timeout <ms>`          | `60000`                                          | per request attempt                                                      |
 
 Output and bookkeeping:
@@ -206,6 +208,20 @@ gateway:
 
 ```bash
 TYPESAFE_BASE_URL=https://ai-gateway.lolipop.jp TYPESAFE_DEFAULT_MODEL=typesafe/jev-latest
+```
+
+To use [OpenJEV](https://openjev.sh) instead, set `OPENJEV_API_KEY` (get one
+from https://openjev.sh/dashboard). When only `OPENJEV_API_KEY` is set (and
+`TYPESAFE_API_KEY` is not), the CLI automatically uses OpenJEV at
+`https://api.openjev.sh` with model `openjev`. To force OpenJEV even when a
+TypeSafe key is also present, set `JEV_PROVIDER=openjev`; to force TypeSafe,
+set `JEV_PROVIDER=typesafe`. `OPENJEV_DEFAULT_MODEL` overrides the OpenJEV
+model name. Anyone with a TypeSafe key and no `JEV_PROVIDER` sees zero
+behaviour change.
+
+```bash
+export OPENJEV_API_KEY=...   # https://openjev.sh/dashboard
+npx @kongyo2/similarity-ts-jev .
 ```
 
 The code of each reported pair is sent to that endpoint and nowhere else.

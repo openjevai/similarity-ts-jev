@@ -193,8 +193,8 @@ function buildProgram(io: CliIO): Command {
       "Extra attempts per request after a rate limit, a server error, or a connection failure (on top of the SDK's own)",
       String(DEFAULT_RETRIES),
     )
-    .option("--model <name>", "Jev model name (default: TYPESAFE_DEFAULT_MODEL or jev-latest)")
-    .option("--base-url <url>", "TypeSafe-compatible API root (default: TYPESAFE_BASE_URL or https://api.typesafe.ai)")
+    .option("--model <name>", "Jev model name (default: TYPESAFE_DEFAULT_MODEL, OPENJEV_DEFAULT_MODEL, jev-latest, or openjev)")
+    .option("--base-url <url>", "TypeSafe-compatible API root (default: TYPESAFE_BASE_URL, https://api.typesafe.ai, or https://api.openjev.sh)")
     .option("--cache <file>", "Record Jev's answers in this JSON file and replay them on later runs")
     .option("--timeout <ms>", "Timeout per Jev request attempt", "60000")
     .option("--dry-run", "Detect and print the pair, request, and token counts without asking Jev", false)
@@ -234,11 +234,51 @@ function buildProgram(io: CliIO): Command {
   return program;
 }
 
-function createClient(options: { model?: string; baseURL?: string; timeout: number }): TypeSafeClient {
+const OPENJEV_BASE_URL = "https://api.openjev.sh";
+const OPENJEV_MODEL = "openjev";
+
+interface ProviderConfig {
+  provider: "typesafe" | "openjev";
+  model?: string;
+  baseURL?: string;
+  apiKey?: string;
+}
+
+/**
+ * Resolve which Jev provider to use.
+ *
+ * 1. Explicit `JEV_PROVIDER=openjev` (or `typesafe`) wins.
+ * 2. Otherwise, if `TYPESAFE_API_KEY` is set → TypeSafe (unchanged default).
+ * 3. Otherwise, if only `OPENJEV_API_KEY` is set → OpenJEV.
+ *
+ * Anyone with a TypeSafe key sees zero behaviour change.
+ */
+function resolveProvider(explicit: { model?: string; baseURL?: string }): ProviderConfig {
+  const choice = process.env.JEV_PROVIDER?.trim().toLowerCase();
+  const openjevKey = process.env.OPENJEV_API_KEY?.trim();
+  const typesafeKey = process.env.TYPESAFE_API_KEY?.trim();
+  if (choice === "openjev" || (choice !== "typesafe" && openjevKey && !typesafeKey)) {
+    return {
+      provider: "openjev",
+      model: explicit.model ?? process.env.OPENJEV_DEFAULT_MODEL?.trim() ?? OPENJEV_MODEL,
+      baseURL: explicit.baseURL ?? OPENJEV_BASE_URL,
+      apiKey: openjevKey,
+    };
+  }
+  return { provider: "typesafe", model: explicit.model, baseURL: explicit.baseURL };
+}
+
+function createClient(options: {
+  model?: string;
+  baseURL?: string;
+  apiKey?: string;
+  timeout: number;
+}): TypeSafeClient {
   try {
     return new TypeSafeClient({
       ...(options.model !== undefined ? { defaultModel: options.model } : {}),
       ...(options.baseURL !== undefined ? { baseURL: options.baseURL } : {}),
+      ...(options.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
       timeout: options.timeout,
       logLevel: "warn",
     });
@@ -247,7 +287,8 @@ function createClient(options: { model?: string; baseURL?: string; timeout: numb
       throw new Error(
         "TYPESAFE_API_KEY is not set. Jev needs a TypeSafe API key (https://console.typesafe.ai/keys). " +
           "For a TypeSafe-compatible gateway set TYPESAFE_BASE_URL and TYPESAFE_DEFAULT_MODEL as well, " +
-          "e.g. TYPESAFE_BASE_URL=https://ai-gateway.lolipop.jp TYPESAFE_DEFAULT_MODEL=typesafe/jev-latest.",
+          "e.g. TYPESAFE_BASE_URL=https://ai-gateway.lolipop.jp TYPESAFE_DEFAULT_MODEL=typesafe/jev-latest. " +
+          "To use OpenJEV instead, set OPENJEV_API_KEY (or JEV_PROVIDER=openjev).",
         { cause: error },
       );
     }
@@ -417,15 +458,16 @@ export async function runCli(argv: string[], io: CliIO = console, run: RunOption
       );
     const client =
       run.client ??
-      lazyClient(
-        () =>
-          createClient({
-            ...(raw.model !== undefined ? { model: raw.model } : {}),
-            ...(raw.baseUrl !== undefined ? { baseURL: raw.baseUrl } : {}),
-            timeout,
-          }),
-        raw.model ?? (process.env.TYPESAFE_DEFAULT_MODEL?.trim() || "jev-latest"),
-      );
+      (() => {
+        const provider = resolveProvider({
+          ...(raw.model !== undefined ? { model: raw.model } : {}),
+          ...(raw.baseUrl !== undefined ? { baseURL: raw.baseUrl } : {}),
+        });
+        return lazyClient(
+          () => createClient({ ...provider, timeout }),
+          provider.model ?? (process.env.TYPESAFE_DEFAULT_MODEL?.trim() || "jev-latest"),
+        );
+      })();
     const judged = await judgeReport(detection, client, {
       cwd,
       ...decideOptions,
